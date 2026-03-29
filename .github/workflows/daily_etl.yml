@@ -1,0 +1,61 @@
+name: Daily ETL Pipeline
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+env:
+  DATABASE_URL: postgresql://warehouse:warehouse@localhost:5432/warehouse
+
+jobs:
+  run-etl:
+    name: Extract Transform Load
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: warehouse
+          POSTGRES_PASSWORD: warehouse
+          POSTGRES_DB: warehouse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U warehouse -d warehouse"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply schema
+        run: |
+          PGPASSWORD=warehouse psql -h localhost -U warehouse -d warehouse -f sql/schema.sql
+
+      - name: Run ETL pipeline
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: python -m etl.pipeline
+
+      - name: Verify row counts
+        run: |
+          PGPASSWORD=warehouse psql -h localhost -U warehouse -d warehouse -c "
+            SELECT 'dim_repos' AS tbl, COUNT(*) FROM dim_repos
+            UNION ALL SELECT 'fact_repo_metrics', COUNT(*) FROM fact_repo_metrics
+            UNION ALL SELECT 'fact_transactions', COUNT(*) FROM fact_transactions
+            UNION ALL SELECT 'fact_tweets', COUNT(*) FROM fact_tweets;
+          "
