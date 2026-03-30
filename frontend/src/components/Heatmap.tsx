@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import clsx from "clsx";
 
 interface HeatmapProps {
   data: Record<string, unknown>[];
